@@ -2479,7 +2479,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Email học viên (Mỗi dòng 1 email hoặc cách nhau dấu phẩy)</label>
-          <textarea class="form-input" id="studentEmails" rows="5" required
+          <textarea class="form-input" id="listEmails" rows="5" required
             placeholder="nguyenva@gmail.com, tranvb@gmail.com..."></textarea>
         </div>
         <button type="submit" class="form-btn">THÊM HỌC VIÊN</button>
@@ -2527,7 +2527,7 @@
   <script>
     // ========== CẤU HÌNH API - THAY ĐỔI URL NÀY ==========
     // ========== CẤU HÌNH API - THAY ĐỔI URL NÀY ==========
-    const API_URL = 'https://script.google.com/macros/s/AKfycbxQb1HxoD9um1WNfHce9vTqEJqscpoFk_15pfN89SCho1uSGnN-iNaUZTqMsC5jEh7T/exec';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbypp1thCzYNOmdFQI7zBtGBb5NmYHpLTqZvlSu2hdst7Exb9e0TnXD6H3mm5gaduJ2XWQ/exec';
 
     // Helper: Escape HTML (Fix for blank report)
     function escapeHtml(text) {
@@ -3078,7 +3078,31 @@
                   </tr>
                </thead>
                <tbody>
-                  ${users.map(u => `
+                  ${users.map(u => {
+        // Logic Status Color
+        let statusClass = 'status-inactive'; // Default grey/yellow
+        let statusLabel = u.status;
+
+        if (u.status === 'Approve') {
+          statusClass = 'status-active'; // Green
+        } else if (u.status === 'Locked') {
+          statusClass = 'status-locked'; // Red (Need CSS or Inline Style)
+        } else {
+          statusLabel = 'Pending';
+        }
+
+        // Button Logic
+        let actionBtn = '';
+        if (u.status === 'Approve') {
+          actionBtn = `<button class="btn-sm" onclick="toggleLockUser('${u.email}', 'Approve')" style="color:#f44336;border-color:#f4433633">🔒 Lock</button>`;
+        } else if (u.status === 'Locked') {
+          actionBtn = `<button class="btn-sm" onclick="toggleLockUser('${u.email}', 'Locked')" style="color:#4caf50;border-color:#4caf5033">🔓 Unlock</button>`;
+        } else {
+          // Pending -> Approve
+          actionBtn = `<button class="btn-sm" onclick="toggleLockUser('${u.email}', 'Pending')" style="color:#22c55e;border-color:#22c55e33">✅ Approve</button>`;
+        }
+
+        return `
                     <tr class="user-row">
                        <td style="display:flex;align-items:center;gap:12px">
                           <div class="profile-avatar" style="width:32px;height:32px;font-size:12px;border-width:1px">${String(u.name || '').charAt(0)}</div>
@@ -3088,16 +3112,18 @@
                        <td class="u-phone">${escapeHtml(u.phone)}</td>
                        <td>${escapeHtml(u.role)}</td>
                        <td>
-                          <span class="status-badge ${u.status === 'Locked' ? 'status-inactive' : 'status-active'}">${u.status}</span>
+                          <span class="status-badge ${statusClass}" 
+                                style="${u.status === 'Locked' ? 'background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.2)' : ''}">
+                             ${statusLabel}
+                          </span>
                        </td>
                        <td style="display:flex;gap:8px">
                           <button class="btn-sm" onclick="viewUserProfile('${u.email}')">👁️ View</button>
-                          <button class="btn-sm" onclick="toggleLockUser('${u.email}', '${u.status}')" style="color:${u.status === 'Locked' ? '#4caf50' : '#f44336'}">
-                             ${u.status === 'Locked' ? '🔓 Unlock' : '🔒 Lock'}
-                          </button>
+                          ${actionBtn}
                        </td>
                     </tr>
-                  `).join('')}
+                  `;
+      }).join('')}
                </tbody>
             </table>
          </div>
@@ -3188,14 +3214,27 @@
     }
 
     async function toggleLockUser(email, currentStatus) {
-      const newStatus = currentStatus === 'Locked' ? 'Active' : 'Locked';
-      if (!confirm(`Are you sure you want to ${newStatus} this user?`)) return;
+      let newStatus = 'Approve';
+      let actionText = 'Unlock';
+
+      if (currentStatus === 'Approve') {
+        newStatus = 'Locked';
+        actionText = 'Lock';
+      } else if (currentStatus === 'Pending') {
+        newStatus = 'Approve'; // Approve
+        actionText = 'Approve';
+      }
+
+      if (!confirm(`Are you sure you want to ${actionText} this user?`)) return;
 
       showToast('Updating status...', 'info');
+
+      // Call API
       const res = await callAPI('updateStudentStatus', { email, status: newStatus });
+
       if (res.success) {
         showToast('Updated successfully!', 'success');
-        loadAdminUsers(); // Reload table
+        loadAdminUsers(true); // Force Reload
       } else {
         showToast(res.message, 'error');
       }
@@ -3312,14 +3351,224 @@
     let emailRecipients = []; // Global store for recipients
     let excludedEmails = []; // Emails to exclude
 
+    // Helper: Handle Filter Change (Show/Hide Config)
+    function handleFilterTypeChange() {
+      const typeEl = document.getElementById('emailFilterType');
+      if (!typeEl) return;
+      const type = typeEl.value;
+      console.log('🔄 [EmailMkt] Filter Changed to:', type);
+
+      // Hide all configs first
+      const configInactive = document.getElementById('configInactive');
+      const configCourse = document.getElementById('configCourse');
+      const filterConfigArea = document.getElementById('filterConfigArea');
+
+      if (configInactive) configInactive.style.display = 'none';
+      if (configCourse) configCourse.style.display = 'none';
+      if (filterConfigArea) filterConfigArea.style.display = 'none';
+
+      if (type === 'inactive') {
+        if (filterConfigArea) filterConfigArea.style.display = 'block';
+        if (configInactive) configInactive.style.display = 'block';
+      } else if (type === 'course') {
+        if (filterConfigArea) filterConfigArea.style.display = 'block';
+        if (configCourse) configCourse.style.display = 'block';
+      }
+
+      // Trigger Preview Load
+      loadRecipientPreview();
+    }
+
+    async function handleScheduleCampaign() {
+      const filter = document.getElementById('emailFilterType').value;
+      const senderName = document.getElementById('emailSenderName').value || 'LMS System';
+      const subject = document.getElementById('emailSubject').value;
+      const body = getEmailContent();
+
+      // Validate Schedule Inputs
+      // HTML has <input type="datetime-local" id="scheduleTime">
+      const dateTimeInput = document.getElementById('scheduleTime');
+      const rawDateTime = dateTimeInput ? dateTimeInput.value : ''; // "YYYY-MM-DDTHH:MM"
+      const recurrence = document.getElementById('scheduleRecurrence').value;
+
+      if (!rawDateTime) {
+        showToast('Vui lòng chọn ngày và giờ gửi!', 'warning');
+        return;
+      }
+
+      // Combine Date Time
+      const scheduledTime = new Date(rawDateTime);
+      if (isNaN(scheduledTime.getTime()) || scheduledTime < new Date()) {
+        showToast('Thời gian gửi phải ở tương lai!', 'warning');
+        return;
+      }
+
+      if (!subject || !body || body === '<p><br></p>') {
+        showToast('Vui lòng điền Subject và Nội dung email', 'warning');
+        return;
+      }
+
+      // Construct Config (Duplicated from loadRecipientPreview logic for safety)
+      let config = {};
+      if (filter === 'inactive') {
+        const daysEl = document.getElementById('inactiveDays');
+        config.days = daysEl ? daysEl.value : 30;
+      } else if (filter === 'course') {
+        const courseEl = document.getElementById('filterCourseSelect');
+        config.courseName = courseEl ? courseEl.value : '';
+        config.statuses = [];
+        document.querySelectorAll('.course-status-cb:checked').forEach(cb => config.statuses.push(cb.value));
+      }
+
+      // Format for confirm message
+      const dateStr = scheduledTime.toLocaleString('vi-VN');
+      if (!confirm(`Xác nhận lên lịch gửi email này vào ${dateStr}?`)) return;
+
+      showToast('Đang lên lịch...', 'info');
+      try {
+        const res = await callAPI('scheduleEmailCampaign', {
+          filterType: filter,
+          filterConfig: config,
+          senderName: senderName,
+          subject: subject,
+          body: body,
+          scheduledTime: scheduledTime.toISOString(), // Send as ISO string
+          recurrence: recurrence,
+          excludedEmails: excludedEmails // Use the global excludedEmails
+        });
+
+        if (res.success) {
+          showToast('Chiến dịch đã được lên lịch thành công!', 'success');
+          // Optionally clear form or refresh UI
+          document.getElementById('emailSubject').value = '';
+          quillEditor.root.innerHTML = '<p>Hi {{name}},</p><p><br></p><p>Nội dung email của bạn...</p>';
+          document.getElementById('scheduleTime').value = '';
+          document.getElementById('scheduleRecurrence').value = 'none';
+          loadEmailStats(); // Refresh stats
+        } else {
+          showToast('Lỗi lên lịch: ' + res.message, 'error');
+        }
+      } catch (e) {
+        console.error('❌ [EmailMkt] Schedule Campaign Error:', e);
+        showToast('Lỗi kết nối lên lịch chiến dịch', 'error');
+      }
+    }
+
+    // Helper: Load Recipient Preview
+    async function loadRecipientPreview() {
+      const typeEl = document.getElementById('emailFilterType');
+      if (!typeEl) return;
+      const type = typeEl.value;
+
+      // Gather Config
+      let config = {};
+      if (type === 'inactive') {
+        const daysEl = document.getElementById('inactiveDays');
+        config.days = daysEl ? daysEl.value : 30;
+      } else if (type === 'course') {
+        const courseEl = document.getElementById('filterCourseSelect');
+        config.courseName = courseEl ? courseEl.value : '';
+        config.statuses = [];
+        document.querySelectorAll('.course-status-cb:checked').forEach(cb => config.statuses.push(cb.value));
+      }
+
+      console.log('🔍 [EmailMkt] Loading Preview...', { type, config });
+
+      // Show Loading
+      const countBadge = document.getElementById('recipientCount');
+      const listContainer = document.getElementById('recipientPreviewList');
+      if (countBadge) countBadge.textContent = '...';
+      if (listContainer) listContainer.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Loading...</div>';
+
+      try {
+        const res = await callAPI('getRecipientPreview', { filterType: type, filterConfig: config });
+        if (res.success) {
+          console.log('✅ [EmailMkt] Recipients Found:', res.total);
+          // Update Global Recipient Store
+          emailRecipients = res.recipients || [];
+          excludedEmails = []; // Reset exclusions
+
+          renderRecipientListUI(emailRecipients);
+        } else {
+          showToast('Lỗi tải danh sách: ' + res.message, 'error');
+          if (listContainer) listContainer.innerHTML = `<div style="text-align:center;padding:20px;color:red">${res.message}</div>`;
+        }
+      } catch (e) {
+        console.error('❌ [EmailMkt] Preview Error:', e);
+        showToast('Lỗi kết nối preview', 'error');
+      }
+    }
+
+    // Helper: Render List UI
+    function renderRecipientListUI(list) {
+      const container = document.getElementById('recipientPreviewList');
+      const countSpan = document.getElementById('recipientCount');
+
+      if (countSpan) countSpan.textContent = list.length;
+      // Update selected count in "Execute" section if it exists
+      const selectedCountEl = document.getElementById('selectedCount');
+      if (selectedCountEl) selectedCountEl.textContent = list.length;
+
+      if (!container) return;
+
+      if (list.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">No recipients found</div>';
+        return;
+      }
+
+      // Limit rendering for performance if list is huge
+      const renderList = list.slice(0, 100);
+      const remaining = list.length - renderList.length;
+
+      container.innerHTML = renderList.map(u => `
+            <div style="padding:8px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; font-size:13px" class="recipient-row">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <input type="checkbox" class="recipient-checkbox" checked value="${u.email}" onchange="updateExcluded(this)">
+                    <div style="width:24px;height:24px;border-radius:50%;background:var(--bg-800);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-muted)">
+                        ${(u.name || 'U').charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <div style="color:white">${u.name || 'Unknown'}</div>
+                        <div style="color:var(--text-muted);font-size:11px">${u.email}</div>
+                    </div>
+                </div>
+                <div style="font-size:11px; padding:2px 6px; border-radius:4px; background:${u.status === 'Active' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(248, 113, 113, 0.1)'}; color:${u.status === 'Active' ? '#34d399' : '#f87171'}">
+                    ${u.status}
+                </div>
+            </div>
+        `).join('') + (remaining > 0 ? `<div style="text-align:center;padding:10px;color:var(--text-muted);font-size:11px">...and ${remaining} more</div>` : '');
+    }
+
+    // Helper: Update Excluded
+    function updateExcluded(checkbox) {
+      const email = checkbox.value;
+      if (!checkbox.checked) {
+        if (!excludedEmails.includes(email)) excludedEmails.push(email);
+      } else {
+        excludedEmails = excludedEmails.filter(e => e !== email);
+      }
+      // Update count text
+      const selectedCountEl = document.getElementById('selectedCount');
+      if (selectedCountEl) selectedCountEl.textContent = emailRecipients.length - excludedEmails.length;
+    }
+
     async function loadAdminEmailMarketing() {
       console.log('🔍 [EmailMkt] Loading Email Marketing tab...');
       const content = document.getElementById('adminContent');
       content.innerHTML = renderEmailMarketingUI();
       if (window.lucide) lucide.createIcons();
 
+      // Initialize Main Email Editor (Call once immediately)
+      initEmailEditor();
+
       // Load real stats
-      await loadEmailStats();
+      loadEmailStats();
+
+      // Helper to get content
+      window.getEmailContent = function () {
+        if (!quillEditor) return '';
+        return quillEditor.root.innerHTML;
+      };
 
       // Check auto reminder status
       try {
@@ -3330,19 +3579,45 @@
         }
       } catch (e) { console.error(e); }
 
-      // Setup filter change listener
-      document.getElementById('emailFilter').addEventListener('change', loadRecipientPreview);
+      // NEW: Load Courses for Filter
+      try {
+        const homeData = await callAPI('getHomeData', {});
+        const courseSelect = document.getElementById('filterCourseSelect');
+        // getHomeData returns an ARRAY directly, not {courses: [...]}
+        const courses = Array.isArray(homeData) ? homeData : (homeData.courses || homeData || []);
+        console.log('🔍 [EmailMkt] Courses loaded for filter:', courses.length);
+
+        if (courseSelect && courses.length > 0) {
+          courseSelect.innerHTML = courses.map(c => {
+            const name = c.courseName || c.name || '';
+            return `<option value="${name}">${name}</option>`;
+          }).join('');
+          courseSelect.onchange = loadRecipientPreview;
+        }
+
+        // Add listeners for other inputs
+        const daysInput = document.getElementById('inactiveDays');
+        if (daysInput) daysInput.onchange = loadRecipientPreview;
+
+        document.querySelectorAll('.course-status-cb').forEach(cb => {
+          cb.onchange = loadRecipientPreview;
+        });
+
+      } catch (e) { console.error('Error loading courses for filter', e); }
+
+      // Setup filter change listener (Use correct ID 'emailFilterType')
+      const filterSelect = document.getElementById('emailFilterType');
+      if (filterSelect) {
+        filterSelect.onchange = handleFilterTypeChange;
+      }
 
       // Load initial preview
-      await loadRecipientPreview();
+      handleFilterTypeChange();
 
       // Load Email Configuration (Drive Folder, etc.)
       await loadEmailConfiguration();
 
-      // Initialize Quill Rich Text Editor (Main)
-      initEmailEditor();
-
-      // Initialize Quill for Reminder
+      // Initialize Quill for Reminder (if exists)
       if (document.getElementById('reminderEditor')) {
         window.quillReminder = new Quill('#reminderEditor', {
           theme: 'snow',
@@ -3623,14 +3898,36 @@
                   </select>
                   
                   <!-- Dynamic Config Area -->
-                  <div id="filterConfigArea" style="padding-left:12px; border-left:2px solid var(--border); display:none"></div>
+                  <div id="filterConfigArea" style="padding-left:12px; border-left:2px solid var(--border); display:none; margin-top:12px">
+                     <!-- 1. Inactive Config -->
+                     <div id="configInactive" style="display:none">
+                        <label class="form-label" style="font-size:12px">Inactive for (days):</label>
+                        <input type="number" id="inactiveDays" class="form-input" value="30" style="width:80px">
+                     </div>
+
+                     <!-- 2. Course Config -->
+                     <div id="configCourse" style="display:none">
+                        <label class="form-label" style="font-size:12px">Select Course:</label>
+                        <select id="filterCourseSelect" class="form-input" style="margin-bottom:8px"></select>
+                        
+                        <label class="form-label" style="font-size:12px">Status:</label>
+                        <div style="display:flex;gap:12px">
+                           <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                              <input type="checkbox" class="course-status-cb" value="Studying" checked> Studying
+                           </label>
+                           <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                              <input type="checkbox" class="course-status-cb" value="Completed" checked> Completed
+                           </label>
+                           <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                              <input type="checkbox" class="course-status-cb" value="Not Started" checked> Not Started
+                           </label>
+                        </div>
+                     </div>
+                  </div>
                </div>
 
                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-                  <div class="form-group" style="margin-bottom:0">
-                     <label class="form-label">Sender Name</label>
-                     <input type="text" id="emailSenderName" class="form-input" placeholder="VD: AZ English Academy" value="AZ English Academy">
-                  </div>
+                  <!-- Sender Name removed (Use Default in Config) -->
                   <div class="form-group" style="margin-bottom:0">
                      <label class="form-label">Subject</label>
                      <input type="text" id="emailSubject" class="form-input" placeholder="Enter subject...">
@@ -3702,29 +3999,15 @@
             </div>
           </div>
 
-          <!-- Automation -->
-          <div class="stat-card" style="margin-top:24px; padding:24px; flex-direction:row; align-items:center; justify-content:space-between">
-             <div>
-                <h3 style="margin:0 0 4px 0; font-size:16px; color:white">Inactive Student Reminder</h3>
-                <div style="font-size:13px; color:var(--text-muted)">Automatically send email if inactive for 7 days (Runs daily at 9:00 AM)</div>
-             </div>
-             <label class="switch" style="position:relative; display:inline-block; width:48px; height:24px">
-                <input type="checkbox" id="autoReminderToggle" onchange="handleToggleAutoReminder(this)" style="opacity:0; width:0; height:0">
-                <span style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:#333; transition:.4s; border-radius:34px" 
-                      class="slider"></span>
-                <span style="position:absolute; content:''; height:18px; width:18px; left:3px; bottom:3px; background-color:white; transition:.4s; border-radius:50%; box-shadow:0 2px 4px rgba(0,0,0,0.2)"
-                      class="slider-thumb"></span>
-             </label>
-             <style>
-               #autoReminderToggle:checked + .slider { background-color: #22c55e; }
-               #autoReminderToggle:checked + .slider .slider-thumb { transform: translateX(24px); }
-             </style>
-          </div>
+
           
-          <!-- Campaign History -->
+           <!-- Campaign History -->
           <div class="stat-card" style="margin-top:24px;">
-             <div style="border-bottom:1px solid var(--border); padding-bottom:16px; margin-bottom:16px">
+             <div style="border-bottom:1px solid var(--border); padding-bottom:16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center">
                 <h3 style="margin:0; font-size:18px; color:white">Campaign History</h3>
+                <button class="btn-sm" onclick="openScheduledCampaignsModal()" style="background:var(--bg-800); border:1px solid var(--border); font-size:12px">
+                   <i data-lucide="calendar" style="width:14px; margin-right:6px"></i> View Schedule
+                </button>
              </div>
              <div style="overflow-x:auto">
                 <table style="width:100%;border-collapse:collapse">
@@ -3744,6 +4027,35 @@
              </div>
           </div>
         </div>
+
+        <!-- Scheduled Campaigns Modal -->
+        <div id="modalScheduledCampaigns" class="modal" style="display:none; position:fixed; z-index:100; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.5)">
+          <div class="modal-content" style="background-color:var(--bg-900); margin:10% auto; padding:20px; border:1px solid var(--border); width:80%; max-width:700px; border-radius:8px; position:relative">
+            <span class="close" onclick="document.getElementById('modalScheduledCampaigns').style.display='none'" style="color:var(--text-muted); float:right; font-size:28px; font-weight:bold; cursor:pointer">&times;</span>
+            <h2 style="color:white; margin-top:0; font-size:20px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:20px">📅 Scheduled Email Campaigns</h2>
+            
+            <div style="overflow-x:auto">
+                <table style="width:100%; border-collapse:collapse; color:var(--text-primary)">
+                   <thead>
+                      <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:12px; text-transform:uppercase">
+                         <th style="padding:10px; text-align:left">Scheduled Time</th>
+                         <th style="padding:10px; text-align:left">Subject</th>
+                         <th style="padding:10px; text-align:left">Recurrence</th>
+                         <th style="padding:10px; text-align:center">Status</th>
+                         <th style="padding:10px; text-align:right">Action</th>
+                      </tr>
+                   </thead>
+                   <tbody id="scheduledCampaignsBody">
+                      <tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted)">Loading...</td></tr>
+                   </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top:20px; text-align:right">
+               <button class="btn" onclick="document.getElementById('modalScheduledCampaigns').style.display='none'" style="background:var(--bg-800); border:1px solid var(--border)">Close</button>
+            </div>
+          </div>
+        </div>
       `;
     }
 
@@ -3761,9 +4073,199 @@
 
 
 
+    function toggleSchedule(enable) {
+      const scheduleOptions = document.getElementById('scheduleOptions');
+      if (scheduleOptions) scheduleOptions.style.display = enable ? 'block' : 'none';
+
+      const btn = document.getElementById('btnAction');
+      if (btn) {
+        if (enable) {
+          btn.innerHTML = '<i data-lucide="calendar-check" style="width:16px; margin-right:8px"></i> Schedule Campaign';
+          btn.className = 'btn btn-blue';
+          btn.style.backgroundColor = '#3b82f6'; // Ensure color change
+        } else {
+          btn.innerHTML = '<i data-lucide="send" style="width:16px; margin-right:8px"></i> Execute Campaign';
+          btn.className = 'btn btn-red';
+          btn.style.backgroundColor = ''; // Reset to default (red) from CSS
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    }
+
+    async function handleSendCampaign() {
+      const modeEl = document.querySelector('input[name="sendMode"]:checked');
+      const mode = modeEl ? modeEl.value : 'now';
+
+      if (mode === 'schedule') {
+        await handleScheduleCampaign();
+      } else {
+        await handleSendBatchEmail();
+      }
+    }
+
+    async function handleScheduleCampaign() {
+      const filter = document.getElementById('emailFilterType') ? document.getElementById('emailFilterType').value : 'all';
+      const senderName = null; // Use Default Config
+      const subject = document.getElementById('emailSubject').value;
+      const body = getEmailContent();
+
+      const dateTimeInput = document.getElementById('scheduleTime');
+      const rawDateTime = dateTimeInput ? dateTimeInput.value : '';
+      const recurrence = document.getElementById('scheduleRecurrence').value;
+
+      if (!subject || !body || body === '<p><br></p>') {
+        showToast('Vui lòng điền Subject và Nội dung email', 'warning');
+        return;
+      }
+      if (!rawDateTime) {
+        showToast('Vui lòng chọn ngày và giờ gửi!', 'warning');
+        return;
+      }
+
+      const scheduledTime = new Date(rawDateTime);
+      if (isNaN(scheduledTime.getTime()) || scheduledTime < new Date()) {
+        showToast('Thời gian gửi phải ở tương lai!', 'warning');
+        return;
+      }
+
+      // Filter Config construction
+      let config = {};
+      if (filter === 'inactive') {
+        const daysEl = document.getElementById('inactiveDays');
+        config.days = daysEl ? daysEl.value : 30;
+      } else if (filter === 'course') {
+        const courseEl = document.getElementById('filterCourseSelect');
+        config.courseName = courseEl ? courseEl.value : '';
+        config.statuses = [];
+        document.querySelectorAll('.course-status-cb:checked').forEach(cb => config.statuses.push(cb.value));
+      }
+
+      if (!confirm(`Lên lịch gửi vào ${scheduledTime.toLocaleString('vi-VN')}?`)) return;
+
+      const btn = document.getElementById('btnAction');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="loader"></i> Scheduling...';
+      }
+
+      try {
+        const res = await callAPI('scheduleEmailCampaign', {
+          subject: subject,
+          bodyTemplate: body,
+          filterType: filter,
+          filterConfig: config,
+          senderName: senderName,
+          scheduledTime: scheduledTime.toISOString(),
+          recurrence: recurrence,
+          excludedEmails: excludedEmails
+        });
+
+        if (res.success) {
+          showToast('Đã lên lịch thành công!', 'success');
+          document.getElementById('emailSubject').value = '';
+          if (quillEditor) quillEditor.setContents([]);
+          // Reset UI to Send Now
+          const nowRadio = document.querySelector('input[value="now"]');
+          if (nowRadio) {
+            nowRadio.checked = true;
+            toggleSchedule(false);
+          }
+        } else {
+          showToast(res.message, 'error');
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('Error: ' + e.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+      }
+    }
+
+    // SCHEDULED CAMPAIGNS LOGIC
+    // ==========================================
+
+    function openScheduledCampaignsModal() {
+      document.getElementById('modalScheduledCampaigns').style.display = 'block';
+      loadScheduledCampaigns();
+    }
+
+    async function loadScheduledCampaigns() {
+      const tbody = document.getElementById('scheduledCampaignsBody');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted)">Loading...</td></tr>';
+
+      try {
+        const res = await callAPI('getScheduledCampaigns', {});
+        renderScheduledCampaigns(res);
+      } catch (e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--brand-red)">Error: ${e.message}</td></tr>`;
+      }
+    }
+
+    function renderScheduledCampaigns(data) {
+      const tbody = document.getElementById('scheduledCampaignsBody');
+
+      // Normalize data (handle Array or Object wrapper)
+      let campaigns = [];
+      if (Array.isArray(data)) campaigns = data;
+      else if (data && Array.isArray(data.data)) campaigns = data.data;
+      else if (data && Array.isArray(data.campaigns)) campaigns = data.campaigns;
+
+      if (!campaigns || campaigns.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted)">No scheduled campaigns found.</td></tr>';
+        return;
+      }
+
+      // Use the normalized array
+      tbody.innerHTML = campaigns.map(c => {
+        const scheduledDate = new Date(c.scheduledTime);
+        const dateStr = scheduledDate.toLocaleString('vi-VN');
+
+        return `
+             <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:10px">${dateStr}</td>
+                <td style="padding:10px; font-weight:500">${c.subject}</td>
+                <td style="padding:10px">${c.recurrence || 'Once'}</td>
+                <td style="padding:10px; text-align:center">
+                   <span style="background:#3b82f6; color:white; padding:2px 6px; border-radius:4px; font-size:10px">SCHEDULED</span>
+                </td>
+                <td style="padding:10px; text-align:right">
+                   <button class="btn-sm btn-red" onclick="cancelScheduledCampaign('${c.id}')" style="font-size:10px; padding:4px 8px">
+                      <i data-lucide="trash-2" style="width:12px; margin-right:4px"></i> Cancel
+                   </button>
+                </td>
+             </tr>
+          `;
+      }).join('');
+
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
+    async function cancelScheduledCampaign(id) {
+      if (!confirm("Are you sure you want to cancel this scheduled campaign?")) return;
+
+      showToast("Cancelling campaign...", "info");
+      try {
+        const res = await callAPI('deleteScheduledCampaign', { id: id });
+        if (res.success) {
+          showToast("Campaign cancelled successfully", "success");
+          loadScheduledCampaigns(); // Reload list
+        } else {
+          showToast(res.message, "error");
+        }
+      } catch (e) {
+        showToast("Error: " + e.message, "error");
+      }
+    }
+
     async function handleSendTestEmail() {
       const testEmail = document.getElementById('testEmailInput').value;
-      const senderName = document.getElementById('emailSenderName').value || 'LMS System';
+      const senderName = null; // Use Default Config
       const subject = document.getElementById('emailSubject').value;
       const body = getEmailContent();
 
@@ -3795,8 +4297,10 @@
     }
 
     async function handleSendBatchEmail() {
-      const filter = document.getElementById('emailFilter').value;
-      const senderName = document.getElementById('emailSenderName').value || 'LMS System';
+      // FIX ID REFERENCE: emailFilterType NOT emailFilter
+      const filterEl = document.getElementById('emailFilterType');
+      const filter = filterEl ? filterEl.value : 'all';
+      const senderName = null; // Use Default Config
       const subject = document.getElementById('emailSubject').value;
       const body = getEmailContent();
       const actualRecipients = emailRecipients.length - excludedEmails.length;
@@ -3815,10 +4319,12 @@
 
       console.log('🔍 [EmailMkt] Sending campaign:', { filter, senderName, actualRecipients, excludedCount: excludedEmails.length });
 
-      const btn = document.getElementById('btnSendMail');
-      const originalText = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = '<i class="loader"></i> Sending...';
+      const btn = document.getElementById('btnAction'); // FIX: Use btnAction instead of btnSendMail
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="loader"></i> Sending...';
+      }
 
       try {
         const res = await callAPI('sendBatchEmail', {
@@ -3826,7 +4332,16 @@
           senderName: senderName,
           subject: subject,
           bodyTemplate: body,
-          excludedEmails: excludedEmails
+          excludedEmails: excludedEmails,
+          filterConfig: { // Pass config for backend logs/logic
+            // Reconstruct config if needed, similar to handleScheduleCampaign
+            // For now basic filterType is handled by backend logic
+            // But if specific course/days needed:
+            // Let's add them:
+            days: document.getElementById('inactiveDays')?.value || 30,
+            courseName: document.getElementById('filterCourseSelect')?.value || '',
+            statuses: Array.from(document.querySelectorAll('.course-status-cb:checked')).map(cb => cb.value)
+          }
         });
 
         console.log('✅ [EmailMkt] Campaign result:', res);
@@ -3846,9 +4361,16 @@
         console.error('❌ [EmailMkt] Campaign error:', e);
         showToast('Error sending emails: ' + e.message, 'error');
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
       }
+    }
+
+    async function loadAutoReminderSettings() {
+      // Stub function to prevent ReferenceError if Email Marketing module is not fully loaded
+      console.log('🔍 loadAutoReminderSettings called (stub)');
     }
 
     async function handleToggleAutoReminder(el) {
@@ -3903,25 +4425,26 @@
 
     async function callAPI(action, data = {}) {
       try {
-        const formData = new URLSearchParams();
-        formData.append('action', action);
+        // ✅ Standardized JSON payload
+        const payload = {
+          action: action,
+          data: data
+        };
 
-        // Flatten data object thành form fields
-        for (const key in data) {
-          if (typeof data[key] === 'object' && data[key] !== null) {
-            formData.append(key, JSON.stringify(data[key]));
-          } else {
-            formData.append(key, data[key]);
-          }
-        }
-
+        // ✅ Use 'text/plain' to avoid CORS preflight (OPTIONS request)
+        // This is a reliable pattern for Google Apps Script Web Apps
         const response = await fetch(API_URL, {
           method: 'POST',
-          body: formData  // ← FormData, không phải JSON
+          mode: 'cors',
+          headers: {
+            'Content-Type': 'text/plain'
+          },
+          body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
-          throw new Error('Network response was not ok');
+          const errorText = await response.text();
+          throw new Error(`API Error (${response.status}): ${errorText}`);
         }
 
         return await response.json();
@@ -7023,81 +7546,7 @@
     // EMAIL CONFIGURATION & IMAGE UPLOAD LOGIC
     // ==========================================
 
-    // Load email settings
-    async function loadEmailConfiguration() {
-      try {
-        const res = await callAPI('getEmailSettings');
-        if (res.success) {
-          const driveInput = document.getElementById('settingDriveFolder_v3');
-          const headerInput = document.getElementById('settingEmailHeader');
-          const footerInput = document.getElementById('settingEmailFooter');
-          const senderInput = document.getElementById('emailSenderName');
-
-          if (driveInput) driveInput.value = res.settings.driveFolderId || '';
-          if (headerInput) headerInput.value = res.settings.emailHeader || 'LMS SYSTEM';
-          if (footerInput) footerInput.value = res.settings.emailFooter || 'Designed with ❤️ by Vibe Code';
-
-          // Only set sender if empty or default
-          if (senderInput && res.settings.defaultSenderName && senderInput.value === 'AZ English Academy') {
-            senderInput.value = res.settings.defaultSenderName;
-          }
-
-          console.log('✅ [EmailMkt] Config loaded');
-        }
-      } catch (e) { console.error('Error loading config:', e); }
-    }
-
-    // Save email settings (Renamed to bust cache)
-    async function handleSaveEmailConfig() {
-      console.log('🔥 [EmailMkt v2.2] Button Clicked!');
-      const folderEl = document.getElementById('settingDriveFolder_v3');
-      const headerEl = document.getElementById('settingEmailHeader');
-      const footerEl = document.getElementById('settingEmailFooter');
-      const senderEl = document.getElementById('emailSenderName');
-
-      const folderUrl = folderEl ? folderEl.value.trim() : "";
-      const headerText = headerEl ? headerEl.value.trim() : "LMS SYSTEM";
-      const footerText = footerEl ? footerEl.value.trim() : "Designed with ❤️ by Vibe Code";
-      const senderName = senderEl ? senderEl.value.trim() : "";
-
-      // DEBUG POPUP
-      // alert('DEBUG CHECK v2.2:\nFolder Value: "' + folderUrl + '"');
-
-      console.log('🔍 [EmailMkt] Try Saving Config.', { folderUrl, headerText, footerText, senderName });
-
-      if (!folderUrl) {
-        showToast('Vui lòng nhập Link Folder Drive!', 'warning');
-        return;
-      }
-
-      showToast('Đang lưu cấu hình...', 'info');
-      try {
-        const payload = {
-          driveFolderId: folderUrl,
-          emailHeader: headerText,
-          emailFooter: footerText,
-          defaultSenderName: senderName
-        };
-        console.log('🔍 [EmailMkt] Sending Payload:', payload);
-
-        const res = await callAPI('saveEmailSettings', {
-          settings: payload
-        });
-
-        if (res.success) {
-          showToast(res.message, 'success');
-          if (res.folderId && folderEl) {
-            folderEl.value = res.folderId;
-          }
-        } else {
-          showToast(res.message, 'error');
-          console.error('❌ [EmailMkt] Backend Error:', res);
-        }
-      } catch (e) {
-        console.error('❌ [EmailMkt] Frontend Error:', e);
-        showToast('Lỗi lưu cấu hình: ' + e.toString(), 'error');
-      }
-    }
+    // Old configuration logic removed (Overridden by Modal logic at end of file)
 
     // Handle Image Upload from Quill
     async function handleQuillImageUpload(input) {
@@ -7410,6 +7859,4 @@
   </script>
 </body>
 
-
 </html>
-
